@@ -6,7 +6,7 @@ import base64
 import json
 import os
 
-fmts = ['wfdb', 'musexml','json_tnmg', 'leadstudy_xml']
+fmts = ['wfdb', 'musexml','json_tnmg', 'leadstudy_xml', 'musexml_KI']
 
 
 def arg_parse_option(parser):
@@ -32,6 +32,8 @@ def read_ecg(path, format='wfdb'):
         signal, sampling_frequency, leads = read_wfdb(path)
     elif format == 'musexml':
         signal, sampling_frequency, leads  =  read_musexml(path)
+    elif format == 'musexml_KI':
+        signal, sampling_frequency, leads = read_musexml_KI(path)
     elif format == 'json_tnmg':
         d = read_json_tnmg(path)
         signal, sampling_frequency, leads = read_dict_tnmg(d)
@@ -82,6 +84,37 @@ def read_musexml(file):
         else:
             leads.append(l)
     return ecg, sample_rate, leads
+
+
+def read_musexml_KI(file):
+    """Read ge musexml from KI record"""
+    with open(file, 'r') as f:
+        xml_str = f.read()
+
+    ordered_dict = bf.data(fromstring(xml_str))
+    nm = '{http://cardiolex.se/RestEcg.xsd}'
+    wf = ordered_dict[nm+'RestECG'][nm+'Leads'][nm+'RhythmLead']
+    ecg_data = {}
+    for lead in wf:
+        sample_rate = lead[nm + 'SampleRate']['$']
+        scaling = lead[nm + 'Resolution']['$']
+        lead_name = lead[nm + 'LeadId']['$']
+        scaling = scaling / 1000 # to MV
+
+        lead_string = ''.join(lead[nm + 'Samples']['$'].split('\n'))
+        lead_data_bytes = base64.b64decode(lead_string)
+        lead_data = np.frombuffer(lead_data_bytes, dtype='i2') * scaling
+        ecg_data[lead_name] = lead_data
+    # Stack data and return numpy array
+    ecg = np.stack(list(ecg_data.values()), axis=0)
+    leads = []
+    for l in ecg_data.keys():
+        if l in ["I", "II", "III"]:
+            leads.append("D" + l)
+        else:
+            leads.append(l)
+    return ecg, sample_rate, leads
+
 
 
 def read_lead(string_representation):
